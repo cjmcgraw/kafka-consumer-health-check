@@ -1,0 +1,50 @@
+version: "3.9"
+
+services:
+  
+  zookeeper:
+    image: confluentinc/cp-zookeeper:5.1.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: "2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:5.1.0
+    environment:
+      KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
+      KAFKA_ADVERTISED_HOST_NAME: "kafka"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      TOPIC_AUTO_CREATE: "true"
+    depends_on:
+      - zookeeper
+
+  schemaregistry:
+    image: confluentinc/cp-schema-registry:5.1.0
+    environment:
+      SCHEMA_REGISTRY_KAFKASTORE_CONNECTION_URL: zookeeper:2181
+      SCHEMA_REGISTRY_HOST_NAME: schemaregistry
+    depends_on:
+      - zookeeper
+
+  kafka_consumer:
+    build:
+      context: ./
+      dockerfile: ./kafka_consumer/Dockerfile
+    environment:
+      KAFKA_BOOTSTRAP_SERVER: "kafka:9092"
+      KAFKA_GROUP_ID: "abc-123"
+      KAFKA_TOPIC: "test-topic"
+    depends_on:
+      - kafka
+
+  kafka_producer:
+    profiles: ['runnable_only']
+    build:
+      context: ./
+      dockerfile: ./kafka_producer/Dockerfile
+    environment:
+      KAFKA_BOOTSTRAP_SERVER: "kafka:9092"
+      KAFKA_TOPIC: "test-topic"
+    depends_on:
+      - kafka
+
