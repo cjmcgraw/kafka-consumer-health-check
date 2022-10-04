@@ -3,11 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"os"
 	"time"
 
 	"github.com/akamensky/argparse"
-	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/Shopify/sarama"
 )
 
 func getEnv(key string) string {
@@ -23,6 +24,8 @@ func main() {
 	kafkaBootstrapServerEnv := os.Getenv("KAFKA_BOOSTRAP_SERVER")
 	kafkaTopicEnv := os.Getenv("KAFKA_TOPIC")
 	kafkaConsumerGroupEnv := os.Getenv("KAFKA_CONSUMER_GROUP_ID")
+
+	os.A
 
 	parser := argparse.NewParser("kafka-consumer-health-check", "Checks the lag of the current event consumer and ensures it has not exceeded the given conditions")
 	maxLag := *parser.Int("L", "maximum-allowed-lag",
@@ -66,28 +69,6 @@ func main() {
 		panic(parser.Usage(err))
 	}
 
-	kafkaBootstrapServer := kafkaBootstrapServerEnv
-	if len(kafkaConsumerGroupArg) > 0 {
-		kafkaBootstrapServer = kafkaBootstrapServerArg
-	}
-
-	kafkaTopic := kafkaTopicEnv
-	if len(kafkaTopicArg) > 0 {
-		kafkaTopic = kafkaTopicArg
-	}
-
-	kafkaConsumerGroup := kafkaConsumerGroupEnv
-	if len(kafkaConsumerGroupArg) > 0 {
-		kafkaConsumerGroup = kafkaConsumerGroupArg
-	}
-
-	fmt.Printf("checking for exiting topic=%s\n", kafkaTopic)
-	admin, err := kafka.NewAdminClient(&kafka.ConfigMap{
-		"bootstrap.servers": kafkaBootstrapServer,
-	})
-	if err != nil {
-		panic(err)
-	}
 
 	admin.GetMetadata()
 	admin.DescribeConfigs()

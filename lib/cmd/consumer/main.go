@@ -58,6 +58,9 @@ func main() {
 
 	fmt.Printf("starting up consumer\n")
 	c.Subscribe(kafkaTopic, nil)
+	c.OffsetsForTimes()
+
+	c.GetWatermarkOffsets()
 	for {
 		msg, err := c.ReadMessage(-1)
 		if err == nil {
