@@ -55,12 +55,15 @@ func main() {
 		"group.id":          kafkaGroupId,
 		"auto.offset.reset": "earliest",
 	})
+	if err != nil {
+		panic(err)
+	}
 
 	fmt.Printf("starting up consumer\n")
-	c.Subscribe(kafkaTopic, nil)
-	c.OffsetsForTimes()
-
-	c.GetWatermarkOffsets()
+	err = c.Subscribe(kafkaTopic, nil)
+	if err != nil {
+		panic(err)
+	}
 	for {
 		msg, err := c.ReadMessage(-1)
 		if err == nil {
@@ -71,5 +74,4 @@ func main() {
 			fmt.Printf("error processing message: %s\n", err)
 		}
 	}
-	c.Close()
 }
