@@ -2,33 +2,32 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"log"
 	"os"
 	"time"
 
 	"github.com/akamensky/argparse"
+	"github.com/carlm/kafka-consumer-health-check/internal"
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 )
 
-func getEnv(key string) string {
-	val, ok := os.LookupEnv(key)
-	if !ok {
-		errMsg := fmt.Sprintf("Missing required environmental variable: %s", key)
-		panic(errMsg)
-	}
-	return val
-}
-
 func main() {
+	config := internal.LoadConfig(
+		os.Args[0],
+		"--from-environmental-variables",
+		"--kafka-bootstrap-servers-from-env-key", "KAFKA_BOOTSTRAP_SERVER",
+		"--kafka-consumer-group-id-from-env-key", "KAFKA_GROUP_ID",
+		"--kafka-topics-from-env-key", "KAFKA_TOPIC",
+	)
+	log.Printf("loaded config=%+v\n", config)
+
 	parser := argparse.NewParser("kafka-consumer", "kafka consumer")
 	delayTimeSeconds := parser.Int("d", "delay", &argparse.Options{Required: true, Help: "seconds to wait before processing each event"})
-	kafkaBootstrapServer := getEnv("KAFKA_BOOTSTRAP_SERVER")
-	kafkaGroupId := getEnv("KAFKA_GROUP_ID")
-	kafkaTopic := getEnv("KAFKA_TOPIC")
+	parser.Parse(os.Args)
 
-	fmt.Printf("checking for exiting topic=%s\n", kafkaTopic)
+	log.Printf("checking for exiting topic=%s\n", config.Topics[0])
 	admin, err := kafka.NewAdminClient(&kafka.ConfigMap{
-		"bootstrap.servers": kafkaBootstrapServer,
+		"bootstrap.servers": config.KafkaServers,
 	})
 	if err != nil {
 		panic(err)
@@ -40,7 +39,7 @@ func main() {
 	results, err := admin.CreateTopics(
 		ctx,
 		[]kafka.TopicSpecification{{
-			Topic:             kafkaTopic,
+			Topic:             config.Topics[0],
 			NumPartitions:     1,
 			ReplicationFactor: 1,
 		}},
@@ -48,30 +47,34 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Printf("created topics with response=%s\n", results)
+	log.Printf("created topics with response=%s\n", results)
 
 	c, err := kafka.NewConsumer(&kafka.ConfigMap{
-		"bootstrap.servers": kafkaBootstrapServer,
-		"group.id":          kafkaGroupId,
+		"bootstrap.servers": config.KafkaServers,
+		"group.id":          config.GroupId,
 		"auto.offset.reset": "earliest",
 	})
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Printf("starting up consumer\n")
-	err = c.Subscribe(kafkaTopic, nil)
+	log.Printf("starting up consumer\n")
+	err = c.Subscribe(config.Topics[0], nil)
 	if err != nil {
 		panic(err)
 	}
+	log.Printf("retrieving partition assignments")
+	partitions, err := c.Assignment()
+	if err !
+	log.Printf("partitions=%v", partitions)
 	for {
 		msg, err := c.ReadMessage(-1)
 		if err == nil {
-			fmt.Printf("inbound valid message. Sleeping for %d seconds...\n", *delayTimeSeconds)
+			log.Printf("inbound valid message. Sleeping for %d seconds...\n", *delayTimeSeconds)
 			time.Sleep(time.Duration(*delayTimeSeconds))
-			fmt.Printf("Processed message on %s: %s\n", msg.TopicPartition, string(msg.Value))
+			log.Printf("Processed message on partition=%s: value=%x\n", msg.TopicPartition, string(msg.Value))
 		} else {
-			fmt.Printf("error processing message: %s\n", err)
+			log.Printf("error processing message: %s\n", err)
 		}
 	}
 }

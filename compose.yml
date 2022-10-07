@@ -44,7 +44,18 @@ services:
       dockerfile: ./kafka_producer/Dockerfile
     environment:
       KAFKA_BOOTSTRAP_SERVER: "kafka:9092"
+      KAFKA_GROUP_ID: "abc-123"
       KAFKA_TOPIC: "test-topic"
     depends_on:
       - kafka
 
+  kafka_healthcheck:
+    profiles: ['runnable_only']
+    build:
+      context: ./
+      dockerfile: ./kafka_healthcheck/Dockerfile
+    environment:
+      KAFKA_BOOTSTRAP_SERVER: "kafka:9092"
+      KAFKA_GROUP_ID: "abc-123"
+    depends_on:
+      - kafka

@@ -1,9 +1,8 @@
 FROM golang:1.19-bullseye
 
 WORKDIR /usr/src/app
-COPY lib/go.* .
+COPY lib .
 RUN go mod download && go mod verify
-COPY lib/cmd/consumer ./
-RUN go build -v -o /usr/local/bin/app .
-ENTRYPOINT ["app"]
+RUN go build -v -o consumer cmd/consumer/main.go
+ENTRYPOINT ["./consumer"]
 

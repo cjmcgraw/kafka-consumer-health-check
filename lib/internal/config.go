@@ -1,126 +1,171 @@
 package internal
 
 import (
-	"github.com/akamensky/argparse"
-	"github.com/thedevsaddam/gojsonq"
+	"fmt"
 	"log"
 	"os"
+	"strings"
+
+	"github.com/akamensky/argparse"
+	"github.com/thedevsaddam/gojsonq"
 )
 
 type Config struct {
 	KafkaServers string
 	GroupId      string
+	Topics       []string
 }
 
-func LoadConfig(arguments []string) *Config {
+func LoadConfig(args ...string) *Config {
 	parser := argparse.NewParser("healthcheck", "runs healthcheck against consumer")
-	jsonFilePath := *parser.String("", "--from-json-file", &argparse.Options{
+	jsonFilePath := parser.String("", "from-json-file", &argparse.Options{
 		Default: "",
 		Help:    "json file to use to load configurations. Has additional required arguments for jq keys",
 	})
 
-	fromEnvironment := *parser.Flag("", "--from-environmental-variables", &argparse.Options{
+	fromEnvironment := parser.Flag("", "from-environmental-variables", &argparse.Options{
 		Default: false,
 		Help:    "load the configuration from environmental variables provided. Has additional requirements for keys",
 	})
 
-	parser.Parse(arguments)
+	parser.Parse(args)
 
-	if len(jsonFilePath) >= 0 {
-		return loadFromFile(arguments, jsonFilePath)
+	if len(*jsonFilePath) > 0 {
+		log.Printf("loading config from json file=%s\n", *jsonFilePath)
+		return loadFromFile(args, *jsonFilePath)
 	}
 
-	if fromEnvironment {
-		return loadFromEnvironment(arguments)
+	if *fromEnvironment {
+		log.Println("loading config from environmental variables")
+		return loadFromEnvironment(args)
 	}
 
-	return loadFromArgs(arguments)
+	log.Println("loading config from CLI arguments")
+	return loadFromArgs(args)
 }
 
 func loadFromEnvironment(args []string) *Config {
 	parser := argparse.NewParser("healthcheck", "runs healthcheck against consumer")
-	kafkaKey := *parser.String("", "--kafka-bootstrap-servers-from-env-key", &argparse.Options{
+	kafkaKey := parser.String("", "kafka-bootstrap-servers-from-env-key", &argparse.Options{
 		Required: true,
 		Help:     "key to load from the environmental variables",
 	})
-	groupIdKey := *parser.String("", "--kafka-consumer-group-id-from-env-key", &argparse.Options{
+	groupIdKey := parser.String("", "kafka-consumer-group-id-from-env-key", &argparse.Options{
+		Required: true,
+		Help:     "key to load from the environmental variables",
+	})
+	topicsKey := parser.String("", "kafka-topics-from-env-key", &argparse.Options{
 		Required: true,
 		Help:     "key to load from the environmental variables",
 	})
 	parser.Parse(args)
 
-	kafkaServers := os.Getenv(kafkaKey)
-	if len(kafkaServers) == 0 {
-		log.Fatalf("failed to find envvar for key --kafka-bootstrap-servers-from-env-key=%s", kafkaKey)
+	topicsCsv := os.Getenv(*topicsKey)
+	topics := strings.Split(strings.TrimSpace(topicsCsv), ",")
+	if len(topics) == 0 {
+		msg := fmt.Sprintf("Failed to find valid envvar for --kafka-topics-from-env-key=%s", *topicsKey)
+		log.Fatalln(parser.Usage(msg))
 	}
 
-	groupId := os.Getenv(groupIdKey)
+	kafkaServers := os.Getenv(*kafkaKey)
+	if len(kafkaServers) == 0 {
+		msg := fmt.Sprintf("failed to find valid envvar for --kafka-bootstrap-servers-from-env-key=%s", *kafkaKey)
+		log.Fatalln(parser.Usage(msg))
+	}
+
+	groupId := os.Getenv(*groupIdKey)
 	if len(groupId) == 0 {
-		log.Fatalf("Failed to find envvar for --kafka-consumer-group-id-from-env-key=%s", groupIdKey)
+		msg := fmt.Sprintf("failed to find valid envvar for --kafka-consumer-group-id-from-env-key=%s", *groupIdKey)
+		log.Fatalln(parser.Usage(msg))
 	}
 
 	return &Config{
 		kafkaServers,
 		groupId,
+		topics,
 	}
 }
 
 func loadFromFile(args []string, filepath string) *Config {
 	jq := gojsonq.New().File(filepath)
 	if jq.Error() != nil {
-		panic(jq.Errors())
+		log.Fatalf("error processing JQ file filepath=%s error=%s", filepath, jq.Error())
 	}
 
 	parser := argparse.NewParser("healthcheck", "runs healthcheck against")
-	kafkaKey := *parser.String("", "--kafka-bootstrap-servers-from-json-file", &argparse.Options{
+	kafkaKey := parser.String("", "kafka-bootstrap-servers-from-json-file", &argparse.Options{
 		Required: true,
 		Help:     "jq accessible key format for the json file",
 	})
-	groupIdKey := *parser.String("", "--kafka-consumer-group-id-from-json-file", &argparse.Options{
+	groupIdKey := parser.String("", "kafka-consumer-group-id-from-json-file", &argparse.Options{
 		Required: true,
 		Help:     "jq accessible key format for the json file",
+	})
+	topicKey := parser.String("", "kafka-topic-from-json-file", &argparse.Options{
+		Required: true,
+		Help:     "jq accessble key format for the json file",
 	})
 	parser.Parse(args)
 
-	kafkaServers := jq.From(kafkaKey).String()
+	var topics []string
+	jq.From(*topicKey).Where(*topicKey, "lengt", 0).Out(&topics)
 	if jq.Error() != nil {
-		log.Printf("failed to process jq with error: %s", jq.Error())
-		log.Fatalf("Failed to find key in json file via jq --kafka-bootstrap-servers-from-file=%s", kafkaKey)
+		log.Fatalf("failed to process topics from key file: err=%s\n", jq.Error())
 	}
-	if len(kafkaServers) == 0 {
-		log.Fatalf("Found empty/misisng key in json file using --kafka-bootstrap-servers-from-file=%s", kafkaKey)
+	if len(topics) <= 0 {
+		msg := fmt.Sprintf("failed to process topic from key file. Invalid or missing key!")
+		log.Fatalln(parser.Usage(msg))
 	}
 
-	groupId := jq.From(groupIdKey).String()
+	kafkaServers := jq.From(*kafkaKey).String()
 	if jq.Error() != nil {
 		log.Printf("failed to process jq with error: %s", jq.Error())
-		log.Fatalf("Failed to find key in json file via jq --kafka-consumer-group-id-from-json-file=%s", groupIdKey)
+		log.Fatalf("Failed to find key in json file via jq --kafka-bootstrap-servers-from-file=%s", *kafkaKey)
+	}
+	if len(kafkaServers) == 0 {
+		log.Fatalf("Found empty/misisng key in json file using --kafka-bootstrap-servers-from-file=%s", *kafkaKey)
+	}
+
+	groupId := jq.From(*groupIdKey).String()
+	if jq.Error() != nil {
+		log.Printf("failed to process jq with error: %s", jq.Error())
+		log.Fatalf("Failed to find key in json file via jq --kafka-consumer-group-id-from-json-file=%s", *groupIdKey)
 	}
 	if len(groupId) == 0 {
-		log.Fatalf("Found empty/misisng key in json file using --kafka-consumer-group-id-from-file=%s", groupIdKey)
+		log.Fatalf("Found empty/misisng key in json file using --kafka-consumer-group-id-from-file=%s", *groupIdKey)
 	}
 
 	return &Config{
 		kafkaServers,
 		groupId,
+		topics,
 	}
 }
 
 func loadFromArgs(args []string) *Config {
 	parser := argparse.NewParser("healthcheck", "runs healthcheck against the kafka consumer")
-	config := &Config{
-		KafkaServers: *parser.String("", "kafka-bootstrap-servers", &argparse.Options{Required: true}),
-		GroupId:      *parser.String("", "kafka-consumer-group-id", &argparse.Options{Required: true}),
-	}
+
+	KafkaServers := parser.String("", "kafka-bootstrap-servers", &argparse.Options{Required: true})
+	GroupId := parser.String("", "kafka-consumer-group-id", &argparse.Options{Required: true})
+	topicsCsv := parser.String("", "kafka-topics-csv", &argparse.Options{Required: true})
 	parser.Parse(args)
 
-	if len(config.KafkaServers) <= 0 {
-		log.Fatalln("missing required parameter --kafka-bootstrap-servers")
+	topics := strings.Split(strings.TrimSpace(*topicsCsv), ",")
+	if len(topics) <= 0 {
+		log.Fatalln(parser.Usage("invalid or missing parameter --kafka-topics-csv"))
 	}
 
-	if len(config.GroupId) <= 0 {
-		log.Fatalln("missing required parameter --kafka-consumer-group-id")
+	if len(*KafkaServers) <= 0 {
+		log.Fatalln(parser.Usage("missing required parameter --kafka-bootstrap-servers"))
 	}
 
-	return config
+	if len(*GroupId) <= 0 {
+		log.Fatalln(parser.Usage("missing required parameter --kafka-consumer-group-id"))
+	}
+
+	return &Config{
+		KafkaServers: *KafkaServers,
+		GroupId:      *GroupId,
+		Topics:       topics,
+	}
 }

@@ -2,53 +2,49 @@ package main
 
 import (
 	"context"
-	"fmt"
-	"github.com/google/uuid"
+	"log"
 	"os"
 	"time"
 
 	"github.com/akamensky/argparse"
+	"github.com/carlm/kafka-consumer-health-check/internal"
 	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/google/uuid"
 )
-
-func getEnv(key string) string {
-	val, ok := os.LookupEnv(key)
-	if !ok {
-		errMsg := fmt.Sprintf("Missing required environmental variable: %s", key)
-		panic(errMsg)
-	}
-	return val
-}
 
 func getUUID() []byte {
 	val, err := uuid.New().MarshalBinary()
 	if err != nil {
-		panic(err)
+		log.Fatalf("failed to generate UUID for unknown reason! err=%s\n", err)
 	}
 	return val
 }
 
 func main() {
+	config := internal.LoadConfig(
+		os.Args[0],
+		"--from-environmental-variables",
+		"--kafka-bootstrap-servers-from-env-key", "KAFKA_BOOTSTRAP_SERVER",
+		"--kafka-consumer-group-id-from-env-key", "KAFKA_GROUP_ID",
+		"--kafka-topics-from-env-key", "KAFKA_TOPIC",
+	)
+	log.Printf("loaded config=%+v\n", config)
+
 	parser := argparse.NewParser("kafka-consumer", "kafka consumer")
 	events := parser.Int("n", "events", &argparse.Options{Required: true, Help: "number of events to send"})
-	err := parser.Parse(os.Args)
-	if err != nil {
-		panic(parser.Usage(err))
-	}
-	kafkaBootstrapServer := getEnv("KAFKA_BOOTSTRAP_SERVER")
-	kafkaTopic := getEnv("KAFKA_TOPIC")
+	parser.Parse(os.Args)
 
-	fmt.Printf("%d\n", *events)
 	if *events <= 0 {
-		panic("must provide atleast 1 event with --events ")
+		log.Fatalln("must provide at least 1 event with --events ")
 	}
 
-	fmt.Printf("checking for exiting topic=%s\n", kafkaTopic)
+	log.Printf("checking for exiting topic=%s\n", config.Topics[0])
 	admin, err := kafka.NewAdminClient(&kafka.ConfigMap{
-		"bootstrap.servers": kafkaBootstrapServer,
+		"bootstrap.servers": config.KafkaServers,
 	})
+	defer admin.Close()
 	if err != nil {
-		panic(err)
+		log.Fatalf("failed to create admin client! err=%s\n", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -57,33 +53,36 @@ func main() {
 	results, err := admin.CreateTopics(
 		ctx,
 		[]kafka.TopicSpecification{{
-			Topic:             kafkaTopic,
+			Topic:             config.Topics[0],
 			NumPartitions:     1,
 			ReplicationFactor: 1,
 		}},
 		kafka.SetAdminOperationTimeout(time.Duration(3000)))
 	if err != nil {
-		panic(err)
+		log.Fatalf("failed to create topics for unknown reason, err=%s\n", err)
 	}
-	fmt.Printf("created topics with response=%s\n", results)
+	log.Printf("created topics with response=%s\n", results)
 
 	p, err := kafka.NewProducer(&kafka.ConfigMap{
-		"bootstrap.servers": kafkaBootstrapServer,
+		"bootstrap.servers": config.KafkaServers,
 	})
+	defer p.Close()
 	if err != nil {
-		panic(err)
+		log.Fatalf("failed to create producer! err=%s\n", err)
 	}
 
-	fmt.Printf("sending %d events\n", *events)
+	log.Printf("sending %d events\n", *events)
 	for i := 0; i < *events; i++ {
 		value := getUUID()
-		fmt.Printf("sending event %s\n", value)
+		log.Printf("sending event value=%x\n", value)
 		err = p.Produce(&kafka.Message{
-			TopicPartition: kafka.TopicPartition{Topic: &kafkaTopic, Partition: kafka.PartitionAny},
-			Value:          value,
+			TopicPartition: kafka.TopicPartition{
+				Topic:     &config.Topics[0],
+				Partition: kafka.PartitionAny,
+			},
+			Value: value,
 		}, nil)
-		fmt.Println("finished sending event")
+		log.Println("finished sending event")
 	}
-	fmt.Println("finished sending all events")
-	p.Close()
+	log.Println("finished sending all events")
 }
